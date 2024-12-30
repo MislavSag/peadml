@@ -339,5 +339,5 @@ apptainer run image_predictors.sif predictors_padobran.R",
 writeLines(cont, "predictors_padobran.sh")
 
 # Add to padobran
-# scp -r /home/sn/data/strategies/pread/dataset/ padobran:/home/jmaric/pead/dataset
-# scp -r /home/sn/data/strategies/pread/prices padobran:/home/jmaric/pead/prices
+# scp -r /home/sn/data/strategies/pead/dataset/ padobran:/home/jmaric/peadml/dataset
+# scp -r /home/sn/data/strategies/pead/prices padobran:/home/jmaric/peadml/prices
