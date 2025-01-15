@@ -125,12 +125,20 @@ if (interactive()) {
     theme_minimal()
 }
 
+# Remove column we don't need
+cols_remove = c(
+  "eps_investingcom", "eps_forecast_investingcom", "revenue_investingcom",
+  "revenue_forecast_investingcom", "right_time", "actualEarningResult",
+  "estimatedEarning", "same_announce_time", "time_investingcom", "updatedFromDate")
+events[, (cols_remove) := NULL]
+
 # Check for business days
 events[, all(isBusinessDay(date))]
 events[, sum(!isBusinessDay(date))]
 round((events[, sum(!isBusinessDay(date))] / nrow(events)) * 100, 2)
 events = events[symbol %notin% events[!isBusinessDay(date), symbol]]
 events[, all(isBusinessDay(date))]
+
 
 # MARKET DATA AND FUNDAMENTALS ---------------------------------------------
 # Get factors
@@ -187,13 +195,13 @@ prices_dt[date == last_trading_day_corected]
 
 # REGRESSION LABELING ----------------------------------------------------------
 # calculate returns
-prices_dt[, ret_5 := shift(close, -5L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]  
-prices_dt[, ret_22 := shift(close, -21L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
-prices_dt[, ret_44 := shift(close, -43L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
-prices_dt[, ret_66 := shift(close, -65L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
+prices_dt[, ret_5 := shift(close, -6L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]  
+prices_dt[, ret_22 := shift(close, -22L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
+prices_dt[, ret_44 := shift(close, -44L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
+prices_dt[, ret_66 := shift(close, -66L, "shift") / shift(close, -1L, "shift") - 1, by = "symbol"]
 
 # calculate rolling sd
-prices_dt[, sd_5 := roll::roll_sd(close / shift(close, 1L) - 1, 5), by = "symbol"]
+prices_dt[, sd_5 := roll::roll_sd(returns, 5), by = "symbol"]
 prices_dt[, sd_22 := roll::roll_sd(close / shift(close, 1L) - 1, 22), by = "symbol"]
 prices_dt[, sd_44 := roll::roll_sd(close / shift(close, 1L) - 1, 44), by = "symbol"]
 prices_dt[, sd_66 := roll::roll_sd(close / shift(close, 1L) - 1, 66), by = "symbol"]

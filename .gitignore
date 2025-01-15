@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+experiments_*
+gausscov*
+predictors_padobran
