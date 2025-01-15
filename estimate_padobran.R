@@ -142,6 +142,8 @@ DT = DT[order(date)]
 
 
 # TASKS -------------------------------------------------------------------
+print("Tasks")
+
 # Create separate tasks for every target variable
 create_task = function(id_cols, target_ = "ret_5") {
   cols_ = c(id_cols, target_, cols_features)
@@ -175,6 +177,8 @@ tasks = list(
 
 
 # CROSS VALIDATIONS -------------------------------------------------------
+print("Cross Validation")
+
 create_custom_rolling_windows = function(task,
                                          duration_unit = "month",
                                          train_duration,
