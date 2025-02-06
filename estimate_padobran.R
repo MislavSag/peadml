@@ -12,6 +12,7 @@ library(mlr3batchmark)
 library(lubridate)
 library(finautoml)
 
+
 # SETUP -------------------------------------------------------------------
 # # utils https://stackoverflow.com/questions/1995933/number-of-months-between-two-dates
 # monnb <- function(d) {
@@ -145,7 +146,7 @@ DT = DT[order(date)]
 print("Tasks")
 
 # Create separate tasks for every target variable
-create_task = function(id_cols, target_ = "ret_5") {
+create_task = function(id_cols, target_ = "ret5Excess") {
   cols_ = c(id_cols, target_, cols_features)
   task_ = as_task_regr(DT[, ..cols_],
                        id = paste0("task_", target_),
@@ -153,26 +154,16 @@ create_task = function(id_cols, target_ = "ret_5") {
   task_$col_roles$feature = setdiff(task_$col_roles$feature, id_cols)
   return(task_)
 }
-ret_targets
-id_cols_1 = c("symbol", "date")
-id_cols_2 = c(id_cols_1, paste0("ret", c(5, 22, 44, 66)))
+id_cols= c("symbol", "date", "ret1Lead")
 tasks = list(
-  task_week           = create_task(id_cols_1, "ret5"),
-  task_month          = create_task(id_cols_1, "ret22"),
-  task_month2         = create_task(id_cols_1, "ret44"),
-  task_quarter        = create_task(id_cols_1, "ret66"),
-  task_week_std       = create_task(id_cols_2, "retStand5"),
-  task_month_std      = create_task(id_cols_2, "retStand22"),
-  task_month2_std     = create_task(id_cols_2, "retStand44"),
-  task_quarter_std    = create_task(id_cols_2, "retStand66"),
-  task_week_std       = create_task(id_cols_2, "ret5Excess"),
-  task_month_std      = create_task(id_cols_2, "ret22Excess"),
-  task_month2_std     = create_task(id_cols_2, "ret44Excess"),
-  task_quarter_std    = create_task(id_cols_2, "ret66Excess"),
-  task_week_excess    = create_task(id_cols_2, "retExcessStand5"),
-  task_month_excess   = create_task(id_cols_2, "retExcessStand22"),
-  task_month2_excess  = create_task(id_cols_2, "retExcessStand44"),
-  task_quarter_excess = create_task(id_cols_2, "retExcessStand66")
+  task_week_std       = create_task(id_cols, "ret5Excess"),
+  task_month_std      = create_task(id_cols, "ret22Excess"),
+  task_month2_std     = create_task(id_cols, "ret44Excess"),
+  task_quarter_std    = create_task(id_cols, "ret66Excess"),
+  task_week_excess    = create_task(id_cols, "retExcessStand5"),
+  task_month_excess   = create_task(id_cols, "retExcessStand22"),
+  task_month2_excess  = create_task(id_cols, "retExcessStand44"),
+  task_quarter_excess = create_task(id_cols, "retExcessStand66")
 )
 
 
@@ -351,6 +342,9 @@ mlr_filters$add("gausscov_f1st", finautoml::FilterGausscovF1st)
 mlr_measures$add("linex", finautoml::Linex)
 mlr_measures$add("adjloss2", finautoml::AdjLoss2)
 # mlr_measures$add("portfolio_ret", PortfolioRet)
+source("LogisticWeightedReturnToRisk.R")
+mlr_measures$add("logistic_weighted_return_to_risk", LogisticWeightedReturnToRisk)
+
 
 # LEARNERS ----------------------------------------------------------------
 # graph templates
@@ -451,42 +445,42 @@ search_space_template = ps(
   scale_branch.selection = p_fct(levels = c("uniformization", "scale"))
 )
 
-if (interactive()) {
-  # show all combinations from search space, like in grid
-  sp_grid = generate_design_grid(search_space_template, 1)
-  sp_grid = sp_grid$data
-  sp_grid
-  
-  # check ids of nth cv sets
-  train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
-  
-  # help graph for testing preprocessing
-  preprocess_test = function(
-    fb_ = c("nop_filter_target", "filter_target_select")
-  ) {
-    fb_ = match.arg(fb_) # fb_ = "nop_filter_target"
-    task_ = tasks[[1]]$clone()
-    nr = task_$nrow
-    rows_ = (nr-10000):nr
-    # task_$filter(rows_)
-    task_$filter(train_ids)
-    # dates = task_$backend$data(rows_, "date")
-    # print(dates[, min(date)])
-    # print(dates[, max(date)])
-    gr_test = graph_template$clone()
-    # gr_test$param_set$values$filter_target_branch.selection = fb_
-    # gr_test$param_set$values$filter_target_id.q = 0.3
-    # gr_test$param_set$values$subsample.frac = 0.6
-    # gr_test$param_set$values$dropcorr.cutoff = 0.99
-    # gr_test$param_set$values$scale_branch.selection = sc_
-    return(gr_test$train(task_))
-  }
-  
-  # test graph preprocesing
-  system.time({test_default = preprocess_test()})
-  test_default$removeconstants_3.output$n_features
-  # test_2 = preprocess_test(fb_ = "filter_target_select")
-}
+# if (interactive()) {
+#   # show all combinations from search space, like in grid
+#   sp_grid = generate_design_grid(search_space_template, 1)
+#   sp_grid = sp_grid$data
+#   sp_grid
+#   
+#   # check ids of nth cv sets
+#   train_ids = custom_cvs[[1]]$inner$instance$train[[1]]
+#   
+#   # help graph for testing preprocessing
+#   preprocess_test = function(
+#     fb_ = c("nop_filter_target", "filter_target_select")
+#   ) {
+#     fb_ = match.arg(fb_) # fb_ = "nop_filter_target"
+#     task_ = tasks[[1]]$clone()
+#     nr = task_$nrow
+#     rows_ = (nr-10000):nr
+#     # task_$filter(rows_)
+#     task_$filter(train_ids)
+#     # dates = task_$backend$data(rows_, "date")
+#     # print(dates[, min(date)])
+#     # print(dates[, max(date)])
+#     gr_test = graph_template$clone()
+#     # gr_test$param_set$values$filter_target_branch.selection = fb_
+#     # gr_test$param_set$values$filter_target_id.q = 0.3
+#     # gr_test$param_set$values$subsample.frac = 0.6
+#     # gr_test$param_set$values$dropcorr.cutoff = 0.99
+#     # gr_test$param_set$values$scale_branch.selection = sc_
+#     return(gr_test$train(task_))
+#   }
+#   
+#   # test graph preprocesing
+#   system.time({test_default = preprocess_test()})
+#   test_default$removeconstants_3.output$n_features
+#   # test_2 = preprocess_test(fb_ = "filter_target_select")
+# }
 
 # random forest graph
 graph_rf = graph_template %>>%
@@ -800,8 +794,8 @@ designs_l = lapply(custom_cvs, function(cv_) {
                         list(cv_inner$test_set(i)))
     
     # objects for all autotuners
-    # measure_ = msr("portfolio_ret")
-    measure_ = msr("adjloss2")
+    measure_ = msr("logistic_weighted_return_to_risk", minimize = FALSE)
+    # measure_ = msr("adjloss2")
     tuner_   = tnr("hyperband", eta = 3)
     # tuner_   = tnr("mbo")
     # term_evals = 20
@@ -977,6 +971,11 @@ designs_l = lapply(custom_cvs, function(cv_) {
 })
 designs = do.call(rbind, designs_l)
 
+# Decrease desgin if we work locally to decrease time
+if (interactive()) {
+  designs = designs[1:2]
+}
+
 # exp dir
 if (interactive()) {
   dirname_ = "experiments_pead_test"
@@ -999,13 +998,58 @@ batchmark(designs, reg = reg)
 # Save registry
 saveRegistry(reg = reg)
 
-# create sh file
-sh_file = sprintf("
+# If localy, try to execute one job. If not create file
+if (interactive()) {
+  ids = findNotDone(reg = reg)
+  cf = makeClusterFunctionsSocket(ncpus = 2L)
+  reg$cluster.functions = cf
+  saveRegistry(reg = reg)
+  
+  # define resources and submit jobs
+  resources = list(ncpus = 2, memory = 8000)
+  submitJobs(ids = ids$job.id, resources = resources, reg = reg)
+  
+  # Check result
+  res_ = reduceResultsBatchmark(ids = 1:2, store_backends = FALSE, reg = reg)
+  res_dt = as.data.table(res_)
+  res_dt$prediction
+  predictions = lapply(res_dt$prediction, as.data.table)
+  predictions = rbindlist(predictions)
+  predictions[, sum(sign(truth) == sign(response)) / nrow(predictions)]
+  predictions[response > 0, mean(truth)]
+  predictions[response < 0.03, mean(truth)]
+  res_$score(msr("logistic_weighted_return_to_risk"))
+  res_$score(msr("regr.mse"))
+  res_$score(msr("regr.mae"))
+  
+  # Important features
+  files = list.files("gausscov_f1", full.names = TRUE)
+  tasks_ = gsub("gausscov_f1-|-\\d+\\.rds", "", basename(files))
+  tasks_unique = unique(tasks_)
+  gausscov_tasks = list()
+  for (i in seq_along(tasks_unique)) {
+    task_ = tasks_unique[i]
+    print(task_)
+    files_ = files[which(tasks_ == task_)]
+    gausscov_tasks[[i]] = unlist(lapply(files, function(x) {
+      names(head(sort(readRDS(x), decreasing = TRUE), 5))
+    }))
+  }
+  names(gausscov_tasks) = tasks_unique
+  best_vars = lapply(seq_along(gausscov_tasks), function(i) {
+    x = gausscov_tasks[[i]]
+    cbind.data.frame(task = names(gausscov_tasks)[i], 
+                     as.data.table(head(sort(table(x), decreasing = TRUE), 10)))
+  })
+  best_vars = rbindlist(best_vars)
+} else {
+  # create sh file
+  sh_file = sprintf("
 #!/bin/bash
 
 #PBS -N PEAD
 #PBS -l ncpus=4
-#PBS -l mem=32GB
+#PBS -l mem=30GB
 #PBS -J 1-%d
 #PBS -o %s/logs
 #PBS -j oe
@@ -1013,6 +1057,7 @@ sh_file = sprintf("
 cd ${PBS_O_WORKDIR}
 apptainer run image_estimate.sif run_job.R 0 %s
 ", nrow(designs), dirname_, dirname_)
-sh_file_name = "run_month_pead.sh"
-file.create(sh_file_name)
-writeLines(sh_file, sh_file_name)
+  sh_file_name = "run_month_pead.sh"
+  file.create(sh_file_name)
+  writeLines(sh_file, sh_file_name)
+}

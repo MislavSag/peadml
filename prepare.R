@@ -114,10 +114,6 @@ events = unique(rbind(events_ic_similar,
                       events_fmp_similar, 
                       events[date > (Sys.Date() - 1)]))
 
-# Checks
-events[, max(date)] # last date
-events[date == max(date), symbol] # Symbols for last date
-
 # Plot number of rows by date
 if (interactive()) {
   ggplot(events[, .N, by = date][order(date)], aes(x = date, y = N)) +
@@ -138,6 +134,10 @@ events[, sum(!isBusinessDay(date))]
 round((events[, sum(!isBusinessDay(date))] / nrow(events)) * 100, 2)
 events = events[symbol %notin% events[!isBusinessDay(date), symbol]]
 events[, all(isBusinessDay(date))]
+
+# Checks
+events[, max(date)] # last date
+events[date == max(date), symbol] # Symbols for last date
 
 
 # MARKET DATA AND FUNDAMENTALS ---------------------------------------------
@@ -207,10 +207,10 @@ prices_dt[, sd_44 := roll::roll_sd(close / shift(close, 1L) - 1, 44), by = "symb
 prices_dt[, sd_66 := roll::roll_sd(close / shift(close, 1L) - 1, 66), by = "symbol"]
 
 # calculate spy returns
-spy[, ret_5_spy := shift(close, -5L, "shift") / shift(close, -1L, "shift") - 1]
-spy[, ret_22_spy := shift(close, -21L, "shift") / shift(close, -1L, "shift") - 1]
-spy[, ret_44_spy := shift(close, -43L, "shift") / shift(close, -1L, "shift") - 1]
-spy[, ret_66_spy := shift(close, -65L, "shift") / shift(close, -1L, "shift") - 1]
+spy[, ret_5_spy := shift(close, -6L, "shift") / shift(close, -1L, "shift") - 1]
+spy[, ret_22_spy := shift(close, -22L, "shift") / shift(close, -1L, "shift") - 1]
+spy[, ret_44_spy := shift(close, -44L, "shift") / shift(close, -1L, "shift") - 1]
+spy[, ret_66_spy := shift(close, -66L, "shift") / shift(close, -1L, "shift") - 1]
 
 # calculate excess returns
 prices_dt <- merge(prices_dt,
@@ -238,6 +238,12 @@ prices_dt[, ret_stand_66 := ret_66 / shift(sd_66, -65L), by = "symbol"]
 
 # remove unnecesary columns
 prices_dt[, `:=`(sd_5 = NULL, sd_22 = NULL, sd_44 = NULL, sd_66 = NULL)]
+prices_dt[, `:=`(ret_stand_5 = NULL, ret_stand_22 = NULL, ret_stand_44 = NULL, ret_stand_66 = NULL)]
+prices_dt[, `:=`(ret_5 = NULL, ret_22 = NULL, ret_44 = NULL, ret_66 = NULL)]
+
+# Calculate one day return. We will use that in results, to calculate portfolio 
+# returns easier.
+prices_dt[, ret_1_lead := shift(close, type = "lead") / close - 1]
 
 
 # MERGE MARKET DATA, EVENTS AND CLASSIF LABELS ---------------------------------

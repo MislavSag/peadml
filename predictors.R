@@ -9,6 +9,7 @@ library(reticulate)
 library(janitor)
 library(arrow)
 library(AzureStor)
+library(qlcal)
 
 
 # SETUP -------------------------------------------------------------------
@@ -589,6 +590,10 @@ features[symbol == symbol_, .(symbol, date_rolling, date_ohlcv, date)]
 features[, max(date)]
 features[date == max(date), .(symbol, date_rolling, date_ohlcv, date)]
 
+# Remove observations awhere diff between date_ohlcv and date_rolling is greater than 1 business day
+nrow(features[businessDaysBetween(date_rolling, date_ohlcv) > 1]) # We remove those
+features = features[businessDaysBetween(date_rolling, date_ohlcv) <= 1]
+
 # Check for duplicates
 anyDuplicated(features, by = c("symbol", "date"))
 anyDuplicated(features, by = c("symbol", "date_ohlcv"))
@@ -597,7 +602,9 @@ features[duplicated(as.data.frame(features[, .SD, .SDcols = c("symbol", "date_ro
            duplicated(as.data.frame(features[, .SD, .SDcols = c("symbol", "date_rolling")]), fromLast = TRUE), 
          .SD,
          .SDcols = c("symbol", "date", "date_rolling", "date_ohlcv")]
-features = unique(features, by = c("symbol", "date_rolling"))
+if (anyDuplicated(features, by = c("symbol", "date_rolling"))) {
+  features = unique(features, by = c("symbol", "date_rolling"))
+}
 
 # Check merge features and events
 features[symbol == symbol_, .(symbol, date, date_rolling, date_ohlcv)]
@@ -659,88 +666,97 @@ features[, date_features := date]
 features = fundamentals[features, on = c("symbol", "acceptedDate" = "date_features"), roll = Inf]
 features[, .(symbol, date, date_event, acceptedDate, acceptedDateTime, receivablesGrowth)]
 
-# remove unnecesary columns
+# remove unnecessary columns
 features[, `:=`(period = NULL, link = NULL, finalLink = NULL, acceptedDate = NULL,
-                reportedCurrency = NULL, cik = NULL, calendarYear = NULL)]
+                reportedCurrency = NULL, cik = NULL, calendarYear = NULL, 
+                fillingDate = NULL, fundamental_date = NULL)]
 
 # convert char features to numeric features
 char_cols = features[, colnames(.SD), .SDcols = is.character]
 char_cols = setdiff(char_cols, c("symbol", "time", "right_time", "industry", "sector"))
 features[, (char_cols) := lapply(.SD, as.numeric), .SDcols = char_cols]
 
-############# ADD TRANSCRIPTS #################
-# import transcripts sentiments datadata
-# config <- tiledb_config()
-# config["vfs.s3.aws_access_key_id"] <- Sys.getenv("AWS-ACCESS-KEY")
-# config["vfs.s3.aws_secret_access_key"] <- Sys.getenv("AWS-SECRET-KEY")
-# config["vfs.s3.region"] <- "us-east-1"
-# context_with_config <- tiledb_ctx(config)
-# arr <- tiledb_array("s3://equity-transcripts-sentiments",
-#                     as.data.frame = TRUE,
-#                     query_layout = "UNORDERED",
-# )
-# system.time(transcript_sentiments <- arr[])
-# tiledb_array_close(arr)
-# sentiments_dt <- as.data.table(transcript_sentiments)
-# setnames(sentiments_dt, "date", "time_transcript")
-# attr(sentiments_dt$time, "tz") <- "UTC"
-# sentiments_dt[, date := as.Date(time)]
-# sentiments_dt[, time := NULL]
-# cols_sentiment = colnames(sentiments_dt)[grep("FLS", colnames(sentiments_dt))]
 
-# merge with features
-# features[, date_day_after_event_ := date_day_after_event]
-# features <- sentiments_dt[features, on = c("symbol", "date" = "date_day_after_event_"), roll = Inf]
-# features[, .(symbol, date, date_day_after_event, time_transcript, Not_FLS_positive)]
-# features[1:50, .(symbol, date, date_day_after_event, time_transcript, Not_FLS_positive)]
+# TRANSCRIPTS -------------------------------------------------------------
+# Import transcripts for all stocks
+path_ = "/home/sn/data/equity/us/fundamentals/transcripts_sentiment_finbert"
+files = list.files(path_, full.names = TRUE)
+symbols_ = gsub("\\.parquet", "", basename(files))
+files = files[symbols_ %in% features[, unique(symbol)]]
+print(paste0("We removed ", features[, length(unique(symbol))] - length(files), " symbols"))
+transcirpts = rbindlist(lapply(files, read_parquet))
+transcirpts[, date_transcript := as.Date(date)]
+transcirpts = transcirpts[, -c("quarter", "year", "date")]
 
-# remove observations where transcripts are more than 2 days away
-# features <- features[date - as.IDate(as.Date(time_transcript)) >= 3,
-#                      (cols_sentiment) := NA]
-# features[, ..cols_sentiment]
-############# ADD TRANSCRIPTS ###############
+# Merge transcripts and features
+features[, date_features := date]
+features = transcirpts[features, on = c("symbol", "date_transcript" = "date_features"), roll = Inf]
+features[, .(symbol, date, date_event, date_transcript, prob_negative)]
+
+# remove unnecessary columns
+features[, `:=`(date_transcript = NULL)]
 
 
 # MACRO -------------------------------------------------------------------
-# TODO ADD DAILY MACRO DATA AFTER I FINISH IMPORTING AND CLEANING MACRO DATA 
-# # import FRED data
-# fred_meta = fread(file.path("/home/sn/data/macro", "fred_meta.csv"))
-# fred_meta[, unique(frequency_short)]
-# fred_meta = fred_meta[frequency_short %chin% c("D", "W")]
-# fred_meta = fred_meta[observation_start > as.IDate("2010-01-01") &
-#                         observation_end > as.IDate("2023-12-31")]
-# fred_dt = fread(file.path("/home/sn/data/macro", "fred_cleaned.csv"))
-# fred_dt = fred_dt[series_id %chin% fred_meta[, id]]
-# fred_dt = dcast(fred_dt, date_real ~ series_id, value.var = "value")
-# dim(fred_dt)
+# Fred meta
+fred_meta = fread("/home/sn/data/macro/fred_meta.csv")
+fred_meta = fred_meta[last_updated > (Sys.Date() - 60)]
+fred_meta = fred_meta[popularity == 1]
 
-# import macro factors
-macros = read_parquet(
-  path(
-    "/home/sn/data/equity/us",
-    "predictors_daily",
-    "factors",
-    "macro_factors",
-    ext = "parquet"
-  )
-)
+# Import FRED data
+files = list.files("/home/sn/data/macro/fred", full.names = TRUE)
+ids_ = gsub("\\.csv", "", basename(files))
+files = files[ids_ %in% fred_meta[, id]]
+fred_dt = lapply(files, fread)
+fred_dt = rbindlist(fred_dt)
+fred_dt[, date_real := date]
+fred_dt[vintage == 1, date_real := realtime_start]
+fred_dt = fred_dt[, .(id = series_id, date_real, value)]
+fred_dt = fred_dt[date_real > as.Date("2015-01-01")]
 
-# Merge FRED and macro
-# macros = merge(macros, fred_dt, by.x = "date", by.y = "date_real", all.x = TRUE, all.y = FALSE)
-macros = macros[date > as.IDate("2010-01-01")]
+# Clean fredt_dt
+any(fred_dt[, sd(value) == 0, by = id][, V1])
+if (anyDuplicated(fred_dt, by = c("id", "date_real"))) {
+  fred_dt = unique(fred_dt, by = c("id", "date_real"))
+}
+fred_dt = dcast(fred_dt, date_real ~ id, value.var = "value")
+setorder(fred_dt, date_real)
+setnafill(fred_dt, type = "locf", cols = colnames(fred_dt)[3:ncol(fred_dt)])
+remove_cols = fred_dt[, colSums(is.na(fred_dt)) / nrow(fred_dt) > 0.3]
+remove_cols = names(remove_cols[remove_cols == TRUE])
+fred_dt = fred_dt[, .SD, .SDcols= -remove_cols]
+tmp = cor(fred_dt[, -c("date_real")])
+tmp[upper.tri(tmp)] = 0
+diag(tmp) = 0
+tmp = abs(tmp)
+to_remove = c()  # Will store column indices to remove
+for (col_i in seq_len(ncol(tmp))) {
+  # If col_i is already marked for removal, skip it
+  if (col_i %in% to_remove) next
+  
+  # Which columns are highly correlated with col_i?
+  high_cor_with_i = which(tmp[, col_i] > 0.95)
+  
+  # Remove the "extra" columns from those found
+  # Typically we keep the first column we encounter and remove the rest,
+  # or you might decide to keep the one with fewer missing values, etc.
+  # Here, we remove all 'high cor' columns except 'col_i' itself.
+  for (col_j in high_cor_with_i) {
+    if (!(col_j %in% to_remove) && col_j != col_i) {
+      to_remove <- c(to_remove, col_j)
+    }
+  }
+}
+to_remove = unique(to_remove)  # make sure it’s unique
+fred_dt = fred_dt[, .SD, .SDcols = -colnames(tmp)[to_remove]]
 
-# Macro data
+# Merge fred and features
 features[, date_features := date]
-macros[, date_macro := date]
-features = macros[features, on = c("date" = "date_features"), roll = Inf]
-features[, .(symbol, date, date_macro, date_event, vix)]
-features[, date_macro := NULL]
+features = fred_dt[features, on = c("date_real" = "date_features"), roll = Inf]
+features[, .(symbol, date, date_event, date_real, TMBSCBW027NBOG)]
 
-# Final checks for predictors
-any(duplicated(features[, .(symbol, date)]))
-any(duplicated(features[, .(symbol, date_event)]))
-features[, max(date)]
-features[date == max(date), 1:25]
+# remove unnecessary columns
+features[, `:=`(date_real = NULL)]
 
 
 # FEATURES SPACE ----------------------------------------------------------
@@ -754,7 +770,8 @@ features[date == max(date), 1:25]
 # [16] "actualEarningResult"           "estimatedEarning"              "same_announce_time" 
 
 # Features space from features raw
-cols_remove <- c("trading_date_after_event", "time", "datetime_investingcom",
+colnames(features)[grepl("date", colnames(features))]
+cols_remove = c("trading_date_after_event", "time", "datetime_investingcom",
                  "eps_investingcom", "eps_forecast_investingcom", "revenue_investingcom",
                  "revenue_forecast_investingcom", "time_dummy",
                  "trading_date_after_event", "fundamental_date", "cik", "link", "finalLink",
@@ -767,11 +784,10 @@ cols_remove <- c("trading_date_after_event", "time", "datetime_investingcom",
                  # remove dates we don't need
                  setdiff(colnames(features)[grep("date", colnames(features), ignore.case = TRUE)], c("date", "date_event")),
                  # remove columns with i - possible duplicates
-                 colnames(features)[grep("i\\.|\\.y", colnames(features))],
+                 colnames(features)[grep("i\\.|\\.y$", colnames(features))],
                  colnames(features)[grep("^open\\.|^high\\.|^low\\.|^close\\.|^volume\\.|^returns\\.", 
                                          colnames(features))],
-                 "actualEarningResult", "estimatedEarning",
-                 colnames(features)[grepl("\\.y", colnames(features))]
+                 "actualEarningResult", "estimatedEarning"
 )
 cols_non_features <- c("symbol", "date", "time", "right_time", "date_event",
                        "open", "high", "low", "close", "volume", "returns",
@@ -793,53 +809,51 @@ features[, max(date)]
 
 # CLEAN DATA --------------------------------------------------------------
 # Convert columns to numeric. This is important only if we import existing features
-clf_data = copy(features)
-chr_to_num_cols = setdiff(colnames(clf_data[, .SD, .SDcols = is.character]),
+chr_to_num_cols = setdiff(colnames(features[, .SD, .SDcols = is.character]),
                           c("symbol", "time", "right_time", "industry", "sector"))
 if (length(chr_to_num_cols) > 0) {
-  clf_data = clf_data[, (chr_to_num_cols) := lapply(.SD, as.numeric), .SDcols = chr_to_num_cols] 
+  features = features[, (chr_to_num_cols) := lapply(.SD, as.numeric), .SDcols = chr_to_num_cols] 
 }
-log_to_num_cols = colnames(clf_data[, .SD, .SDcols = is.logical])
-clf_data = clf_data[, (log_to_num_cols) := lapply(.SD, as.numeric), .SDcols = log_to_num_cols]
+log_to_num_cols = colnames(features[, .SD, .SDcols = is.logical])
+features = features[, (log_to_num_cols) := lapply(.SD, as.numeric), .SDcols = log_to_num_cols]
 
 # Remove duplicates
-any_duplicates = any(duplicated(clf_data[, .(symbol, date)]))
-if (any_duplicates) clf_data = unique(clf_data, by = c("symbol", "date"))
+any_duplicates = any(duplicated(features[, .(symbol, date)]))
+if (any_duplicates) features = unique(features, by = c("symbol", "date"))
 
 # Remove columns with many NA
-cols_remove = names(which(colMeans(!is.na(clf_data)) < 0.6))
+cols_remove = names(which(colMeans(!is.na(features)) < 0.6))
 cols_remove = setdiff(cols_remove, cols_remove[grepl("^bin_", cols_remove)])
 length(cols_remove)
 length(cols_remove[grepl("tsfresh", cols_remove)])
 length(cols_remove[grepl("tsfel", cols_remove)])
 # TODO: Check all this missing values
-clf_data = clf_data[, .SD, .SDcols = !cols_remove]
+features = features[, .SD, .SDcols = !cols_remove]
 
 # Remove Inf and Nan values if they exists
 is.infinite.data.frame <- function(x) do.call(cbind, lapply(x, is.infinite))
-keep_cols = names(which(colMeans(!is.infinite(as.data.frame(clf_data))) > 0.98))
-print(paste0("Removing columns with Inf values: ", setdiff(colnames(clf_data), keep_cols)))
-clf_data = clf_data[, .SD, .SDcols = keep_cols]
+keep_cols = names(which(colMeans(!is.infinite(as.data.frame(features))) > 0.98))
+print(paste0("Removing columns with Inf values: ", setdiff(colnames(features), keep_cols)))
+features = features[, .SD, .SDcols = keep_cols]
 
 # Remove inf values
-n_0 = nrow(clf_data)
-clf_data = clf_data[is.finite(rowSums(clf_data[, .SD, .SDcols = is.numeric], na.rm = TRUE))]
-n_1 = nrow(clf_data)
+n_0 = nrow(features)
+features = features[is.finite(rowSums(features[, .SD, .SDcols = is.numeric], na.rm = TRUE))]
+n_1 = nrow(features)
 print(paste0("Removing ", n_0 - n_1, " rows because of Inf values"))
 
 # Final checks
 # clf_data[, .(symbol, date, date_rolling)]
 # features[, .(symbol, date, date_rolling)]
 features[, max(date)]
-clf_data[, max(date)]
-clf_data[date == max(date), 1:15]
-clf_data[date == max(date), 1500:1525]
+features[date == max(date), 1:15]
+features[date == max(date), 1500:1525]
 
 # Save features
-last_pead_date = strftime(clf_data[, max(date)], "%Y%m%d")
+last_pead_date = strftime(features[, max(date)], "%Y%m%d")
 file_name = paste0("pead-predictors-", last_pead_date, ".csv")  
 file_name_local = fs::path(PATH_PREDICTORS, file_name)
-fwrite(clf_data, file_name_local)
+fwrite(features, file_name_local)
 
 # Add to padobran
-# scp /home/sn/data/equity/us/predictors_daily/pead_predictors/pead-predictors-20241224.csv padobran:/home/jmaric/peadml/predictors.csv
+# scp /home/sn/data/equity/us/predictors_daily/pead_predictors/pead-predictors-20250130.csv padobran:/home/jmaric/peadml/predictors.csv
