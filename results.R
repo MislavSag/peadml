@@ -21,6 +21,7 @@ BLOBENDPOINT = storage_endpoint(endpoint, key=blob_key)
 
 # IMPORNAT PREDICTORS -----------------------------------------------------
 # Get data from padobran
+# fs::dir_delete("/home/sn/data/strategies/pead/gausscov_f1")
 # scp -r padobran:/home/jmaric/peadml/gausscov_f1 /home/sn/data/strategies/pead/
 
 # Import gausscov f1 data
@@ -47,14 +48,6 @@ best_vars = rbindlist(best_vars)
 
 # Inspect best variables
 tasks_unique
-best_vars[task == "task_retStand5"]
-best_vars[task == "task_retStand22"]
-best_vars[task == "task_retStand44"]
-best_vars[task == "task_retStand66"]
-best_vars[task == "task_ret5Excess"]
-best_vars[task == "task_ret22Excess"]
-best_vars[task == "task_ret44Excess"]
-best_vars[task == "task_ret66Excess"]
 best_vars[task == "task_ret5Excess"]
 best_vars[task == "task_ret22Excess"]
 best_vars[task == "task_ret44Excess"]
@@ -65,6 +58,8 @@ best_vars[task == "task_retExcessStand44"]
 best_vars[task == "task_retExcessStand66"]
 best_vars[, sum(N), by = x]
 
+# Free memory after gauscov feature importance
+rm(list = c("best_vars", "tasks_", "gausscov_tasks"))
 
 # PREDICTIONS -------------------------------------------------------------
 # Get data from padobran
@@ -149,7 +144,7 @@ tasks[[1]]$data$feature_names[grep("eps", tasks[[1]]$data$feature_names, ignore.
 
 # backends
 predictions[, unique(task)]
-get_backend = function(task_name = "task_ret5") {
+get_backend = function(task_name = "task_ret5Excess") {
   # task_name = "task_ret5"
   task_ = tasks[names(tasks) == task_name][[1]]
   back_ = task_$data$backend
@@ -159,26 +154,28 @@ get_backend = function(task_name = "task_ret5") {
   return(back_)
 }
 id_cols = c("symbol", "date", "month", "..row_id", "epsDiff", "nincr",
-            "nincr2y", "nincr3y", paste0("ret_", c("5", "22", "44", "66")))
+            "nincr2y", "nincr3y", "ret1Lead")
 task_ret5_ = get_backend()
-task_ret22_ = get_backend("task_ret22")
-task_ret44_ = get_backend("task_ret44")
-task_ret66_ = get_backend("task_ret66")
-backend = Reduce(function(x, y) merge(x, y, by = c("symbol", "date", "..row_id"), all.x = TRUE, all.y = FALSE),
+task_ret22_ = get_backend("task_ret22Excess")
+task_ret44_ = get_backend("task_ret44Excess")
+task_ret66_ = get_backend("task_ret66Excess")
+backend = Reduce(function(x, y) merge(x, y, by = c("symbol", "date", "..row_id", "ret1Lead"), all.x = TRUE, all.y = FALSE),
                  list(task_ret5_, task_ret22_, task_ret44_, task_ret66_))
 setnames(backend, "..row_id", "row_ids")
 
 # measures
 mlr_measures$add("linex", finautoml::Linex)
 mlr_measures$add("adjloss2", finautoml::AdjLoss2)
+source("LogisticWeightedReturnToRisk.R")
+mlr_measures$add("logistic_weighted_return_to_risk", LogisticWeightedReturnToRisk)
 
 # merge backs and predictions
 predictions = backend[predictions, on = c("row_ids")]
 predictions[, date := as.Date(date)]
-setnames(predictions,
-         c("task_names", "learner_names", "cv_names"),
-         c("task", "learner", "cv"),
-         skip_absent = TRUE)
+# setnames(predictions,
+#          c("task_names", "learner_names", "cv_names"),
+#          c("task", "learner", "cv"),
+#          skip_absent = TRUE)
 
 
 # PREDICTIONS RESULTS -----------------------------------------------------
@@ -216,13 +213,78 @@ predictions_dt[, measures(truth_sign, response_sign), by = c("cv", "learner")]
 predictions_dt[, measures(truth_sign, response_sign), by = c("task", "learner")][order(fbeta)][tnr > 0.4][tpr > 0.4]
 # predictions[, measures(truth_sign, response_sign), by = c("cv", "task", "learner")][order(V1)]
 
+# Regression measures
+long_only = function(truth, response, alpha = 1, eps = 1e-15) {
+  # Zero out non-positive predictions
+  wpos = ifelse(response > 0, 1 / (1 + exp(-alpha * response)), 0)
+  sum_pos = sum(wpos)
+  if (sum_pos < eps) {
+    # No valid weights => 0 measure
+    return(0)
+  }
+  wpos = wpos / sum_pos
+  # Weighted portfolio return
+  port_return = sum(wpos * truth)
+  # Weighted stdev
+  var_p = sum(wpos * (truth - port_return)^2)
+  sd_p = sqrt(var_p)
+  # Return ratio
+  if (sd_p < eps) {
+    if (port_return > 0) return(Inf)
+    else if (port_return < 0) return(-Inf)
+    else return(0)
+  }
+  return(port_return / sd_p)
+}
+long_short = function(truth, response, alpha = 1, eps = 1e-15) {
+  # Positive => logistic => long weights
+  wpos = ifelse(response > 0, 1 / (1 + exp(-alpha * response)), 0)
+  # Negative => logistic on abs => short weights
+  wneg = ifelse(response < 0, 1 / (1 + exp(-alpha * abs(response))), 0)
+  
+  # Normalize each side to sum to 1 (if they are nonzero)
+  sum_pos = sum(wpos)
+  sum_neg = sum(wneg)
+  if (sum_pos > eps) wpos = wpos / sum_pos
+  if (sum_neg > eps) wneg = wneg / sum_neg
+  
+  w_final = wpos - wneg   # net-zero weights
+  
+  # Portfolio return
+  port_return = sum(w_final * truth)
+  
+  # --- Fix is here: weighted variance with absolute weights
+  var_p = sum(abs(w_final) * (truth - port_return)^2)
+  sd_p = sqrt(var_p)
+  
+  # Avoid division by zero
+  if (sd_p < eps) {
+    if (port_return > 0) {
+      return(Inf)
+    } else if (port_return < 0) {
+      return(-Inf)
+    } else {
+      return(0)
+    }
+  }
+  return(port_return / sd_p)
+}
+predictions_dt[, mean(mlr3measures::linex(truth, response)), by = c("task")]
+predictions_dt[, median(mlr3measures::linex(truth, response)), by = c("task")]
+predictions_dt[, long_only(truth, response, ), by = c("task")]
+predictions_dt[, long_only(truth, response, ), by = c("learner")][order(V1)]
+predictions_dt[, long_only(truth, response, ), by = c("task", "learner")][order(V1)]
+predictions_dt[, long_short(truth, response, ), by = c("task")]
+predictions_dt[, long_short(truth, response, ), by = c("learner")][order(V1)]
+predictions_dt[, long_short(truth, response, ), by = c("task", "learner")][order(V1)]
+
 # create truth factor
 predictions_dt[, truth_sign := as.factor(sign(truth))]
 
 # prediction to wide format
 predictions_wide = dcast(
   predictions_dt,
-  task + symbol + date + truth + truth_sign ~ learner,
+  task + symbol + date + truth + truth_sign + ret1Lead ~ learner,
   value.var = "response"
 )
 
@@ -277,19 +339,18 @@ predictions_wide_ens[, calculate_measures(truth_sign, as.factor(sign01(q9_resp))
 # Performance by returns
 cols = colnames(predictions_wide)
 cols = cols[which(cols == "earth"):which(cols == "sum_resp")]
-cols = c("task", "symbol", "date", "truth", cols)
-predictions_long = melt(na.omit(predictions_wide[, ..cols]), id.vars = c("task", "symbol", "date", "truth"))
+cols = c("task", "symbol", "date", "truth", "ret1Lead", cols)
+predictions_long = melt(na.omit(predictions_wide[, ..cols]), 
+                        id.vars = c("task", "symbol", "date", "truth", "ret1Lead"))
 setorder(predictions_long, task, variable, date)
 predictions_long = predictions_long[value > 0]
 predictions_long[, weights := 1 / nrow(.SD), by = c("task", "variable", "date")]
-portfolios = predictions_long[, sum(truth * weights), by = c("task", "variable", "date")]
+portfolios = predictions_long[, sum(ret1Lead * weights), by = c("task", "variable", "date")]
 portfolios[, mean(V1), by = .(task, variable)][order(V1)]
 portfolios = dcast(portfolios[, .(task, variable, date, value = V1)], date + task ~ variable)
-charts.PerformanceSummary(as.xts.data.table(portfolios[task == "task_ret22", .SD, .SDcols = -c("task")]))
-charts.PerformanceSummary(as.xts.data.table(portfolios)["2020/2023"])
-charts.PerformanceSummary(as.xts.data.table(portfolios)["2024"])
-SharpeRatio.annualized(as.xts.data.table(portfolios)["2020/"])
-SharpeRatio(as.xts.data.table(portfolios))
+charts.PerformanceSummary(as.xts.data.table(portfolios[task == "task_retExcessStand5", .SD, .SDcols = -c("task")]))
+charts.PerformanceSummary(as.xts.data.table(portfolios[task == "task_retExcessStand5", .SD, 
+                                                       .SDcols = -c("task", "sum_resp", "kknn")]))
 
 # Save to azure for QC backtest
 cont = storage_container(BLOBENDPOINT, "qc-backtest")

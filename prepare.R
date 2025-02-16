@@ -169,6 +169,9 @@ setkey(prices_dt, "symbol")
 setorder(prices_dt, symbol, date)
 key(prices_dt)
 
+# Calculate most liquid symbols
+prices_dt[, dollar_vol_rank := frankv(close_raw * volume, order = -1L), by = date]
+
 # SPY data
 spy = open_dataset("/home/sn/data/equity/daily_fmp_all.csv", format = "csv") |>
   dplyr::filter(symbol == "SPY") |>
@@ -238,12 +241,13 @@ prices_dt[, ret_stand_66 := ret_66 / shift(sd_66, -65L), by = "symbol"]
 
 # remove unnecesary columns
 prices_dt[, `:=`(sd_5 = NULL, sd_22 = NULL, sd_44 = NULL, sd_66 = NULL)]
-prices_dt[, `:=`(ret_stand_5 = NULL, ret_stand_22 = NULL, ret_stand_44 = NULL, ret_stand_66 = NULL)]
 prices_dt[, `:=`(ret_5 = NULL, ret_22 = NULL, ret_44 = NULL, ret_66 = NULL)]
+prices_dt[, `:=`(ret_excess_stand_5 = NULL, ret_excess_stand_22 = NULL, 
+                 ret_excess_stand_44 = NULL, ret_excess_stand_66 = NULL)]
 
 # Calculate one day return. We will use that in results, to calculate portfolio 
 # returns easier.
-prices_dt[, ret_1_lead := shift(close, type = "lead") / close - 1]
+prices_dt[, ret_1_lead := shift(close, type = "lead") / close - 1, by = "symbol"]
 
 
 # MERGE MARKET DATA, EVENTS AND CLASSIF LABELS ---------------------------------

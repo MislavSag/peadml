@@ -697,66 +697,66 @@ features[, .(symbol, date, date_event, date_transcript, prob_negative)]
 features[, `:=`(date_transcript = NULL)]
 
 
-# MACRO -------------------------------------------------------------------
-# Fred meta
-fred_meta = fread("/home/sn/data/macro/fred_meta.csv")
-fred_meta = fred_meta[last_updated > (Sys.Date() - 60)]
-fred_meta = fred_meta[popularity == 1]
-
-# Import FRED data
-files = list.files("/home/sn/data/macro/fred", full.names = TRUE)
-ids_ = gsub("\\.csv", "", basename(files))
-files = files[ids_ %in% fred_meta[, id]]
-fred_dt = lapply(files, fread)
-fred_dt = rbindlist(fred_dt)
-fred_dt[, date_real := date]
-fred_dt[vintage == 1, date_real := realtime_start]
-fred_dt = fred_dt[, .(id = series_id, date_real, value)]
-fred_dt = fred_dt[date_real > as.Date("2015-01-01")]
-
-# Clean fredt_dt
-any(fred_dt[, sd(value) == 0, by = id][, V1])
-if (anyDuplicated(fred_dt, by = c("id", "date_real"))) {
-  fred_dt = unique(fred_dt, by = c("id", "date_real"))
-}
-fred_dt = dcast(fred_dt, date_real ~ id, value.var = "value")
-setorder(fred_dt, date_real)
-setnafill(fred_dt, type = "locf", cols = colnames(fred_dt)[3:ncol(fred_dt)])
-remove_cols = fred_dt[, colSums(is.na(fred_dt)) / nrow(fred_dt) > 0.3]
-remove_cols = names(remove_cols[remove_cols == TRUE])
-fred_dt = fred_dt[, .SD, .SDcols= -remove_cols]
-tmp = cor(fred_dt[, -c("date_real")])
-tmp[upper.tri(tmp)] = 0
-diag(tmp) = 0
-tmp = abs(tmp)
-to_remove = c()  # Will store column indices to remove
-for (col_i in seq_len(ncol(tmp))) {
-  # If col_i is already marked for removal, skip it
-  if (col_i %in% to_remove) next
-  
-  # Which columns are highly correlated with col_i?
-  high_cor_with_i = which(tmp[, col_i] > 0.95)
-  
-  # Remove the "extra" columns from those found
-  # Typically we keep the first column we encounter and remove the rest,
-  # or you might decide to keep the one with fewer missing values, etc.
-  # Here, we remove all 'high cor' columns except 'col_i' itself.
-  for (col_j in high_cor_with_i) {
-    if (!(col_j %in% to_remove) && col_j != col_i) {
-      to_remove <- c(to_remove, col_j)
-    }
-  }
-}
-to_remove = unique(to_remove)  # make sure it’s unique
-fred_dt = fred_dt[, .SD, .SDcols = -colnames(tmp)[to_remove]]
-
-# Merge fred and features
-features[, date_features := date]
-features = fred_dt[features, on = c("date_real" = "date_features"), roll = Inf]
-features[, .(symbol, date, date_event, date_real, TMBSCBW027NBOG)]
-
-# remove unnecessary columns
-features[, `:=`(date_real = NULL)]
+# # MACRO -------------------------------------------------------------------
+# # Fred meta
+# fred_meta = fread("/home/sn/data/macro/fred_meta.csv")
+# fred_meta = fred_meta[last_updated > (Sys.Date() - 60)]
+# fred_meta = fred_meta[popularity == 1]
+# 
+# # Import FRED data
+# files = list.files("/home/sn/data/macro/fred", full.names = TRUE)
+# ids_ = gsub("\\.csv", "", basename(files))
+# files = files[ids_ %in% fred_meta[, id]]
+# fred_dt = lapply(files, fread)
+# fred_dt = rbindlist(fred_dt)
+# fred_dt[, date_real := date]
+# fred_dt[vintage == 1, date_real := realtime_start]
+# fred_dt = fred_dt[, .(id = series_id, date_real, value)]
+# fred_dt = fred_dt[date_real > as.Date("2015-01-01")]
+# 
+# # Clean fredt_dt
+# any(fred_dt[, sd(value) == 0, by = id][, V1])
+# if (anyDuplicated(fred_dt, by = c("id", "date_real"))) {
+#   fred_dt = unique(fred_dt, by = c("id", "date_real"))
+# }
+# fred_dt = dcast(fred_dt, date_real ~ id, value.var = "value")
+# setorder(fred_dt, date_real)
+# setnafill(fred_dt, type = "locf", cols = colnames(fred_dt)[3:ncol(fred_dt)])
+# remove_cols = fred_dt[, colSums(is.na(fred_dt)) / nrow(fred_dt) > 0.3]
+# remove_cols = names(remove_cols[remove_cols == TRUE])
+# fred_dt = fred_dt[, .SD, .SDcols= -remove_cols]
+# tmp = cor(fred_dt[, -c("date_real")])
+# tmp[upper.tri(tmp)] = 0
+# diag(tmp) = 0
+# tmp = abs(tmp)
+# to_remove = c()  # Will store column indices to remove
+# for (col_i in seq_len(ncol(tmp))) {
+#   # If col_i is already marked for removal, skip it
+#   if (col_i %in% to_remove) next
+#   
+#   # Which columns are highly correlated with col_i?
+#   high_cor_with_i = which(tmp[, col_i] > 0.95)
+#   
+#   # Remove the "extra" columns from those found
+#   # Typically we keep the first column we encounter and remove the rest,
+#   # or you might decide to keep the one with fewer missing values, etc.
+#   # Here, we remove all 'high cor' columns except 'col_i' itself.
+#   for (col_j in high_cor_with_i) {
+#     if (!(col_j %in% to_remove) && col_j != col_i) {
+#       to_remove <- c(to_remove, col_j)
+#     }
+#   }
+# }
+# to_remove = unique(to_remove)  # make sure it’s unique
+# fred_dt = fred_dt[, .SD, .SDcols = -colnames(tmp)[to_remove]]
+# 
+# # Merge fred and features
+# features[, date_features := date]
+# features = fred_dt[features, on = c("date_real" = "date_features"), roll = Inf]
+# features[, .(symbol, date, date_event, date_real, TMBSCBW027NBOG)]
+# 
+# # remove unnecessary columns
+# features[, `:=`(date_real = NULL)]
 
 
 # FEATURES SPACE ----------------------------------------------------------

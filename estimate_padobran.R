@@ -154,16 +154,17 @@ create_task = function(id_cols, target_ = "ret5Excess") {
   task_$col_roles$feature = setdiff(task_$col_roles$feature, id_cols)
   return(task_)
 }
+colnames(DT)[grepl("^ret", colnames(DT))]
 id_cols= c("symbol", "date", "ret1Lead")
 tasks = list(
   task_week_std       = create_task(id_cols, "ret5Excess"),
   task_month_std      = create_task(id_cols, "ret22Excess"),
   task_month2_std     = create_task(id_cols, "ret44Excess"),
   task_quarter_std    = create_task(id_cols, "ret66Excess"),
-  task_week_excess    = create_task(id_cols, "retExcessStand5"),
-  task_month_excess   = create_task(id_cols, "retExcessStand22"),
-  task_month2_excess  = create_task(id_cols, "retExcessStand44"),
-  task_quarter_excess = create_task(id_cols, "retExcessStand66")
+  task_week_excess    = create_task(id_cols, "retStand5"),
+  task_month_excess   = create_task(id_cols, "retStand22"),
+  task_month2_excess  = create_task(id_cols, "retStand44"),
+  task_quarter_excess = create_task(id_cols, "retStand66")
 )
 
 
@@ -342,8 +343,8 @@ mlr_filters$add("gausscov_f1st", finautoml::FilterGausscovF1st)
 mlr_measures$add("linex", finautoml::Linex)
 mlr_measures$add("adjloss2", finautoml::AdjLoss2)
 # mlr_measures$add("portfolio_ret", PortfolioRet)
-source("LogisticWeightedReturnToRisk.R")
-mlr_measures$add("logistic_weighted_return_to_risk", LogisticWeightedReturnToRisk)
+source("madl.R")
+mlr_measures$add("mean_absolute_directional_loss", MeanAbsoluteDirectionalLoss)
 
 
 # LEARNERS ----------------------------------------------------------------
@@ -794,7 +795,7 @@ designs_l = lapply(custom_cvs, function(cv_) {
                         list(cv_inner$test_set(i)))
     
     # objects for all autotuners
-    measure_ = msr("logistic_weighted_return_to_risk", minimize = FALSE)
+    measure_ = msr("mean_absolute_directional_loss", minimize = FALSE)
     # measure_ = msr("adjloss2")
     tuner_   = tnr("hyperband", eta = 3)
     # tuner_   = tnr("mbo")
