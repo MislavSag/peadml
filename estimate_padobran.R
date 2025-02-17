@@ -1019,7 +1019,7 @@ if (interactive()) {
   predictions[, sum(sign(truth) == sign(response)) / nrow(predictions)]
   predictions[response > 0, mean(truth)]
   predictions[response < 0.03, mean(truth)]
-  res_$score(msr("logistic_weighted_return_to_risk"))
+  res_$score(msr("mean_absolute_directional_loss"))
   res_$score(msr("regr.mse"))
   res_$score(msr("regr.mae"))
   
